@@ -1,0 +1,5 @@
+customer_id,signup_at,purchase_history_complete,email_opt_in
+INV-C1,2026-08-01 10:00:00,True,True
+INV-C1,2026-08-05 10:00:00,True,True
+INV-C2,2029-01-01 00:00:00,True,False
+,2026-08-01 10:00:00,False,False

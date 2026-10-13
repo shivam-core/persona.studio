@@ -1,0 +1,2 @@
+order_id,line_id,customer_id,offering_id,order_at,quantity,unit_list_price,discount_amount,refund_amount,unit_variable_cost,status
+SUB-ORD-1,L-1,SUB-C1,SUB-01,2026-08-01 12:00:00,1,1500.0,300.0,0.0,500.0,completed

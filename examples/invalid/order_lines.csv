@@ -1,0 +1,4 @@
+order_id,line_id,customer_id,offering_id,order_at,quantity,unit_list_price,discount_amount,refund_amount,status
+INV-ORD-1,L-1,INV-C1,NON-EXISTENT,2026-09-01 12:00:00,1,1000.0,0.0,0.0,completed
+INV-ORD-2,L-1,UNKNOWN-C,OFF-101,2026-09-01 12:00:00,1,1000.0,0.0,0.0,completed
+INV-ORD-3,L-1,INV-C1,OFF-101,2026-09-01 12:00:00,1,1000.0,200.0,950.0,completed

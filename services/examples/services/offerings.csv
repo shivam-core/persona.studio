@@ -1,0 +1,2 @@
+offering_id,name,category,kind,list_price,unit_variable_cost,fixed_campaign_cost_default,capacity_units,description
+SRV-01,Bespoke Styling Session,Consulting,service,5000.0,2000.0,3000.0,50,1-on-1 private styling

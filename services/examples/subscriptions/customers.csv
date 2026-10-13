@@ -1,0 +1,2 @@
+customer_id,signup_at,purchase_history_complete,email_opt_in,sms_opt_in,region,external_source
+SUB-C1,2026-07-01 10:00:00,True,True,True,Bengaluru,app_signup

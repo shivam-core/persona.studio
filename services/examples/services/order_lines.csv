@@ -1,0 +1,2 @@
+order_id,line_id,customer_id,offering_id,order_at,quantity,unit_list_price,discount_amount,refund_amount,unit_variable_cost,status
+SRV-ORD-1,L-1,SRV-C1,SRV-01,2026-09-01 14:00:00,1,5000.0,0.0,0.0,2000.0,completed
