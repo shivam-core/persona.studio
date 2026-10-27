@@ -14,10 +14,21 @@ from app.domain.segmentation.diagnostics import compute_diagnostics, CandidateDi
 
 
 class CandidateSummary(BaseModel):
+    id: str = ""
     k: int
+    n_clusters: int = 0
     algorithm: str
     diagnostics: dict[str, Any]
     is_recommended: bool = False
+    silhouette_score: float | None = None
+    davies_bouldin_index: float | None = None
+    calinski_harabasz_score: float | None = None
+    aic: float | None = None
+    bic: float | None = None
+    stability_median_ari: float | None = None
+    min_cluster_size: int = 0
+    selection_score: float = 0.0
+    is_qualified: bool = False
 
 
 class CandidateComparison(BaseModel):
@@ -81,7 +92,22 @@ def fit_candidates(
         km = KMeans(n_clusters=k, init="k-means++", n_init=20, max_iter=300, random_state=seed)
         km_labels = km.fit_predict(X)
         km_diag = compute_diagnostics(X, km_labels, k=k, algorithm="kmeans", seed=seed, model_obj=km)
-        candidates.append(CandidateSummary(k=k, algorithm="kmeans", diagnostics=km_diag.to_dict()))
+        candidates.append(CandidateSummary(
+            id=f"kmeans_k{k}",
+            k=k,
+            n_clusters=k,
+            algorithm="kmeans",
+            diagnostics=km_diag.to_dict(),
+            silhouette_score=km_diag.silhouette,
+            davies_bouldin_index=km_diag.davies_bouldin,
+            calinski_harabasz_score=km_diag.calinski_harabasz,
+            aic=km_diag.aic,
+            bic=km_diag.bic,
+            stability_median_ari=km_diag.median_ari,
+            min_cluster_size=min(km_diag.cluster_sizes) if km_diag.cluster_sizes else 0,
+            selection_score=km_diag.heuristic_score,
+            is_qualified=km_diag.is_qualified,
+        ))
         fitted_models[(k, "kmeans")] = km
         fitted_labels[(k, "kmeans")] = km_labels
 
@@ -89,7 +115,22 @@ def fit_candidates(
         gmm = GaussianMixture(n_components=k, covariance_type="diag", reg_covar=1e-4, n_init=5, random_state=seed)
         gmm_labels = gmm.fit_predict(X)
         gmm_diag = compute_diagnostics(X, gmm_labels, k=k, algorithm="gmm", seed=seed, model_obj=gmm)
-        candidates.append(CandidateSummary(k=k, algorithm="gmm", diagnostics=gmm_diag.to_dict()))
+        candidates.append(CandidateSummary(
+            id=f"gmm_k{k}",
+            k=k,
+            n_clusters=k,
+            algorithm="gmm",
+            diagnostics=gmm_diag.to_dict(),
+            silhouette_score=gmm_diag.silhouette,
+            davies_bouldin_index=gmm_diag.davies_bouldin,
+            calinski_harabasz_score=gmm_diag.calinski_harabasz,
+            aic=gmm_diag.aic,
+            bic=gmm_diag.bic,
+            stability_median_ari=gmm_diag.median_ari,
+            min_cluster_size=min(gmm_diag.cluster_sizes) if gmm_diag.cluster_sizes else 0,
+            selection_score=gmm_diag.heuristic_score,
+            is_qualified=gmm_diag.is_qualified,
+        ))
         fitted_models[(k, "gmm")] = gmm
         fitted_labels[(k, "gmm")] = gmm_labels
 
@@ -158,6 +199,7 @@ def fit_candidates(
         "explained_variance_ratio": evr,
         "total_explained_variance": round(sum(evr), 4),
         "sampled_points": pca_points,
+        "coordinates": pca_points,
     }
 
     return CandidateComparison(

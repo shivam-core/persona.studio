@@ -35,6 +35,35 @@ class AudienceSnapshotResponse(BaseModel):
     created_at: str
 
 
+@router.get("", response_model=list[AudienceSnapshotResponse])
+def list_audience_snapshots(db: Session = Depends(get_db)):
+    """List frozen audience snapshots in workspace."""
+    from app.api.routes.workspace import get_or_create_default_workspace
+    ws = get_or_create_default_workspace(db)
+    auds = db.execute(
+        select(AudienceSnapshot)
+        .where(AudienceSnapshot.workspace_id == ws.id)
+        .order_by(AudienceSnapshot.created_at.desc())
+    ).scalars().all()
+    return [
+        AudienceSnapshotResponse(
+            id=a.id,
+            name=a.name,
+            feature_snapshot_id=a.feature_snapshot_id,
+            selected_persona_ids=a.selected_persona_ids_json or [],
+            total_members=a.total_members,
+            evidence_eligible=a.evidence_eligible,
+            objective_eligible=a.objective_eligible,
+            consent_eligible=a.consent_eligible,
+            excluded_count=a.excluded_count,
+            final_planned_count=a.final_planned_count,
+            exclusions_summary=a.exclusions_summary_json or {},
+            created_at=a.created_at.isoformat(),
+        )
+        for a in auds
+    ]
+
+
 @router.post("", response_model=AudienceSnapshotResponse)
 def create_audience_snapshot(
     payload: CreateAudienceRequest,

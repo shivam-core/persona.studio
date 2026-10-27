@@ -188,6 +188,21 @@ def build_persona_evidence(
             return round(float((df[col] <= val).mean() * 100), 1)
 
         fingerprint = {
+            "raw_values": {
+                "orders_lookback": round(seg_med_orders, 1),
+                "aov_lookback": round(seg_med_aov, 2),
+                "recency_days": round(seg_med_recency, 1),
+                "discount_share": round(seg_med_discount, 4),
+                "refund_share": round(seg_med_refund, 4),
+                "net_sales_lookback": round(seg_med_sales, 2),
+            },
+            "percentiles": {
+                "orders_lookback": round(_calc_pct(seg_med_orders, "orders_lookback") / 100.0, 2),
+                "aov_lookback": round(_calc_pct(seg_med_aov, "aov_lookback") / 100.0, 2),
+                "recency_days": round((100.0 - _calc_pct(seg_med_recency, "recency_days")) / 100.0, 2),
+                "discount_share": round(_calc_pct(seg_med_discount, "discount_share") / 100.0, 2),
+                "refund_share": round(_calc_pct(seg_med_refund, "refund_share") / 100.0, 2),
+            },
             "order_frequency": {"percentile": _calc_pct(seg_med_orders, "orders_lookback"), "raw": seg_med_orders},
             "average_order_value": {"percentile": _calc_pct(seg_med_aov, "aov_lookback"), "raw": seg_med_aov},
             "recency_recency": {"percentile": round(100.0 - _calc_pct(seg_med_recency, "recency_days"), 1), "raw": seg_med_recency},

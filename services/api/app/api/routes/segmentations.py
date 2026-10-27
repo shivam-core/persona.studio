@@ -19,14 +19,16 @@ router = APIRouter(prefix="/segmentations", tags=["Segmentations"])
 
 
 class FitSegmentationRequest(BaseModel):
-    feature_snapshot_id: str
+    feature_snapshot_id: str | None = None
+    dataset_id: str | None = None
     population_type: str = "existing_buyer"
     seed: int = 42
 
 
 class PublishSegmentationRequest(BaseModel):
-    k_selected: int
-    algorithm_selected: str  # kmeans, gmm, rule_based_cohorts
+    k_selected: int | None = None
+    algorithm_selected: str | None = None  # kmeans, gmm, rule_based_cohorts
+    candidate_id: str | None = None
 
 
 @router.post("")
@@ -36,15 +38,38 @@ def create_segmentation_run(
     _auth: bool = Depends(require_mutation_access),
 ):
     """Fit candidate segmentation models on features and generate diagnostics."""
-    snapshot = db.execute(
-        select(FeatureSnapshot).where(FeatureSnapshot.id == payload.feature_snapshot_id)
-    ).scalars().first()
+    snapshot = None
+    if payload.feature_snapshot_id:
+        snapshot = db.execute(
+            select(FeatureSnapshot).where(FeatureSnapshot.id == payload.feature_snapshot_id)
+        ).scalars().first()
+        if not snapshot:
+            # Check if feature_snapshot_id was actually a dataset_version_id
+            snapshot = db.execute(
+                select(FeatureSnapshot)
+                .where(FeatureSnapshot.dataset_version_id == payload.feature_snapshot_id)
+                .order_by(FeatureSnapshot.created_at.desc())
+            ).scalars().first()
+
+    if not snapshot and payload.dataset_id:
+        snapshot = db.execute(
+            select(FeatureSnapshot)
+            .where(FeatureSnapshot.dataset_version_id == payload.dataset_id)
+            .order_by(FeatureSnapshot.created_at.desc())
+        ).scalars().first()
+
     if not snapshot:
-        raise HTTPException(status_code=404, detail="Feature snapshot not found.")
+        # Fallback to latest feature snapshot in workspace
+        snapshot = db.execute(
+            select(FeatureSnapshot).order_by(FeatureSnapshot.created_at.desc())
+        ).scalars().first()
+
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="No feature snapshot found. Please build features first in Data Hub.")
 
     cust_features = db.execute(
         select(CustomerFeature).where(
-            CustomerFeature.feature_snapshot_id == payload.feature_snapshot_id,
+            CustomerFeature.feature_snapshot_id == snapshot.id,
             CustomerFeature.population_type == payload.population_type,
         )
     ).scalars().all()
@@ -110,12 +135,44 @@ def create_segmentation_run(
 
     return {
         "id": seg_run.id,
+        "workspace_id": seg_run.workspace_id,
+        "feature_snapshot_id": seg_run.feature_snapshot_id,
+        "population_type": seg_run.population_type,
+        "status": "completed",
         "recommended_k": comparison.recommended_k,
         "recommended_algorithm": comparison.recommended_algorithm,
         "candidates": [c.model_dump() for c in comparison.candidates],
+        "candidate_comparisons": [c.model_dump() for c in comparison.candidates],
         "pca_projection": comparison.pca_projection,
         "status_message": comparison.status_message,
+        "created_at": seg_run.created_at.isoformat() if seg_run.created_at else None,
     }
+
+
+@router.get("")
+def list_segmentation_runs(db: Session = Depends(get_db)):
+    """List all segmentation runs."""
+    runs = db.execute(
+        select(SegmentationRun).order_by(SegmentationRun.created_at.desc())
+    ).scalars().all()
+    results = []
+    for run in runs:
+        results.append({
+            "id": run.id,
+            "workspace_id": run.workspace_id,
+            "feature_snapshot_id": run.feature_snapshot_id,
+            "population_type": run.population_type,
+            "status": "completed" if run.status in ("candidate_ready", "published") else run.status,
+            "k_selected": run.k_selected,
+            "algorithm_selected": run.algorithm_selected,
+            "diagnostics": run.diagnostics_json,
+            "candidates": run.candidate_comparisons_json or [],
+            "candidate_comparisons": run.candidate_comparisons_json or [],
+            "pca_projection": run.pca_projection_json,
+            "published_at": run.published_at.isoformat() if run.published_at else None,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+        })
+    return results
 
 
 @router.get("/{run_id}")
@@ -127,15 +184,18 @@ def get_segmentation_run(run_id: str, db: Session = Depends(get_db)):
 
     return {
         "id": run.id,
+        "workspace_id": run.workspace_id,
         "feature_snapshot_id": run.feature_snapshot_id,
         "population_type": run.population_type,
-        "status": run.status,
+        "status": "completed" if run.status in ("candidate_ready", "published") else run.status,
         "k_selected": run.k_selected,
         "algorithm_selected": run.algorithm_selected,
         "diagnostics": run.diagnostics_json,
-        "candidate_comparisons": run.candidate_comparisons_json,
+        "candidates": run.candidate_comparisons_json or [],
+        "candidate_comparisons": run.candidate_comparisons_json or [],
         "pca_projection": run.pca_projection_json,
         "published_at": run.published_at.isoformat() if run.published_at else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 
 
@@ -267,11 +327,21 @@ def publish_segmentation_candidate(
 
     run.status = "published"
     run.published_at = datetime.utcnow()
-    run.k_selected = payload.k_selected
-    run.algorithm_selected = payload.algorithm_selected
+    chosen_k = payload.k_selected
+    chosen_alg = payload.algorithm_selected
+    if payload.candidate_id and run.candidate_comparisons_json:
+        for c in run.candidate_comparisons_json:
+            if c.get("id") == payload.candidate_id or str(c.get("n_clusters")) == str(payload.candidate_id):
+                chosen_k = c.get("n_clusters")
+                chosen_alg = c.get("algorithm")
+                break
+    run.k_selected = chosen_k or run.k_selected or 2
+    run.algorithm_selected = chosen_alg or run.algorithm_selected or "kmeans"
     db.commit()
 
     return {
+        "status": "success",
+        "persona_card_count": len(created_cards),
         "message": f"Successfully published {len(created_cards)} persona cards.",
         "published_cards": created_cards,
     }

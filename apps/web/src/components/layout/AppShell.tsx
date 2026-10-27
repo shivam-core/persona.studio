@@ -12,11 +12,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <div className="flex min-h-screen bg-[#F5F7FB]">
+    <div className="flex min-h-screen bg-[var(--notion-bg)] text-[var(--notion-text)] selection:bg-[#CDE8FF] dark:selection:bg-[#1A4971] selection:text-neutral-900 dark:selection:text-white transition-colors duration-200">
+      {/* Notion Collapsible Sidebar */}
       <Sidebar workspaceName={workspace?.name} />
-      <div className="flex-1 flex flex-col min-w-0">
+
+      {/* Main Notion Canvas */}
+      <div className="flex-1 flex flex-col min-w-0 bg-[var(--notion-bg)]">
         <TopBar />
-        <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 p-6 lg:p-8 max-w-6xl w-full mx-auto">{children}</main>
       </div>
     </div>
   );

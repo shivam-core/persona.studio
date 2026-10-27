@@ -29,6 +29,38 @@ class JobResponse(BaseModel):
     error_message: str | None
 
 
+@router.get("", response_model=list[JobResponse])
+def list_jobs(db: Session = Depends(get_db)):
+    """List recent background jobs."""
+    from app.api.routes.workspace import get_or_create_default_workspace
+    ws = get_or_create_default_workspace(db)
+    jobs = db.execute(
+        select(Job)
+        .where(Job.workspace_id == ws.id)
+        .order_by(Job.created_at.desc())
+        .limit(25)
+    ).scalars().all()
+    return [
+        JobResponse(
+            id=j.id,
+            workspace_id=j.workspace_id,
+            kind=j.kind,
+            status=j.status,
+            phase=j.phase,
+            progress_pct=j.progress_pct,
+            attempt_count=j.attempt_count,
+            created_at=j.created_at,
+            started_at=j.started_at,
+            heartbeat_at=j.heartbeat_at,
+            finished_at=j.finished_at,
+            result_ref=j.result_ref,
+            error_code=j.error_code,
+            error_message=j.error_message,
+        )
+        for j in jobs
+    ]
+
+
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job_status(job_id: str, db: Session = Depends(get_db)):
     """Fetch status and progress for a background job."""

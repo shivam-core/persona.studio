@@ -1,12 +1,12 @@
 """Pure deterministic campaign economics simulation engine."""
 
 import math
-from typing import Literal
+from typing import Literal, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class SimulationInputs(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     delivery_model: Literal["paid_cpc", "direct_outreach"] = "paid_cpc"
     objective: Literal["acquisition", "retention", "reactivation"] = "acquisition"
@@ -18,6 +18,30 @@ class SimulationInputs(BaseModel):
     cpc: float = Field(default=10.0, gt=0)
     clicks_per_person: float = Field(default=1.0, ge=1.0)
     direct_contact_cost: float = Field(default=1.0, gt=0)
+    contact_cost_direct: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_input_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "direct_contact_cost" not in data or data.get("direct_contact_cost") is None:
+                if "contact_cost_direct" in data and data["contact_cost_direct"] is not None:
+                    data["direct_contact_cost"] = data["contact_cost_direct"]
+            if "list_price" not in data or data.get("list_price") is None:
+                if "aov" in data and data["aov"] is not None:
+                    data["list_price"] = data["aov"]
+                elif "expected_aov" in data and data["expected_aov"] is not None:
+                    data["list_price"] = data["expected_aov"]
+            if "cpc" not in data or data.get("cpc") is None:
+                if "cost_per_click" in data and data["cost_per_click"] is not None:
+                    data["cpc"] = data["cost_per_click"]
+            if "delivery_model" not in data:
+                if "channel_type" in data:
+                    data["delivery_model"] = data["channel_type"]
+            if "conversion_probability" not in data or data.get("conversion_probability") is None:
+                if "baseline_conversion_rate" in data and data["baseline_conversion_rate"] is not None:
+                    data["conversion_probability"] = data["baseline_conversion_rate"]
+        return data
 
     # Audience & Conversion
     audience_n: int = Field(ge=0)

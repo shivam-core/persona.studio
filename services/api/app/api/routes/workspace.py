@@ -107,6 +107,75 @@ def owner_login(payload: LoginRequest, response: Response, db: Session = Depends
         httponly=True,
         samesite="lax",
         secure=settings.APP_ENV == "production",
-        max_age=7 * 24 * 3600,
     )
     return {"message": "Authenticated successfully.", "token": token}
+
+
+@router.post("/reset")
+def reset_workspace_data(
+    db: Session = Depends(get_db),
+    _authorized: bool = Depends(require_mutation_access),
+):
+    """
+    Completely removes all synthetic and existing data across all tables,
+    resetting the workspace to a clean, fresh state ready for real dataset uploads.
+    """
+    from app.db.models import (
+        PersonaCard,
+        EvidenceMetric,
+        SegmentMembership,
+        SegmentationRun,
+        CustomerFeature,
+        FeatureSnapshot,
+        SimulationRun,
+        AllocationRun,
+        ExperimentAnalysis,
+        ExperimentOutcome,
+        ExperimentAssignment,
+        AudienceMember,
+        AudienceSnapshot,
+        Experiment,
+        Campaign,
+        EngagementEvent,
+        OrderLine,
+        Offering,
+        Customer,
+        UploadFile,
+        ValidationIssue,
+        DatasetVersion,
+    )
+
+    ws = get_or_create_default_workspace(db)
+
+    # Delete in strict child -> parent foreign-key dependency order
+    db.query(ExperimentAnalysis).delete()
+    db.query(ExperimentOutcome).delete()
+    db.query(ExperimentAssignment).delete()
+    db.query(Experiment).delete()
+    db.query(AllocationRun).delete()
+    db.query(Campaign).delete()
+    db.query(SimulationRun).delete()
+    db.query(EvidenceMetric).delete()
+    db.query(PersonaCard).delete()
+    db.query(SegmentMembership).delete()
+    db.query(SegmentationRun).delete()
+    db.query(AudienceMember).delete()
+    db.query(AudienceSnapshot).delete()
+    db.query(CustomerFeature).delete()
+    db.query(FeatureSnapshot).delete()
+    db.query(EngagementEvent).delete()
+    db.query(OrderLine).delete()
+    db.query(Offering).delete()
+    db.query(Customer).delete()
+    db.query(ValidationIssue).delete()
+    db.query(UploadFile).delete()
+    db.query(DatasetVersion).delete()
+
+    ws.is_synthetic_demo = False
+    ws.name = "Persona Studio Workspace"
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "All synthetic and existing data successfully removed. Workspace is clean and ready for real data ingestion.",
+    }

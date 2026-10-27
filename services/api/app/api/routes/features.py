@@ -38,6 +38,31 @@ class CustomerFeatureItem(BaseModel):
     cart_events: int
 
 
+@router.get("", response_model=list[FeatureSnapshotResponse])
+def list_feature_snapshots(db: Session = Depends(get_db)):
+    """List all feature snapshots in the workspace."""
+    from app.api.routes.workspace import get_or_create_default_workspace
+    ws = get_or_create_default_workspace(db)
+    snaps = db.execute(
+        select(FeatureSnapshot)
+        .where(FeatureSnapshot.workspace_id == ws.id)
+        .order_by(FeatureSnapshot.created_at.desc())
+    ).scalars().all()
+    return [
+        FeatureSnapshotResponse(
+            id=s.id,
+            dataset_version_id=s.dataset_version_id,
+            snapshot_name=s.snapshot_name,
+            as_of_at=s.as_of_at.isoformat(),
+            lookback_start_at=s.lookback_start_at.isoformat(),
+            lookback_days=s.lookback_days,
+            population_counts=s.population_counts or {},
+            summary_stats=s.summary_stats or {},
+        )
+        for s in snaps
+    ]
+
+
 @router.get("/{snapshot_id}", response_model=FeatureSnapshotResponse)
 def get_feature_snapshot(snapshot_id: str, db: Session = Depends(get_db)):
     """Retrieve metadata and population counts for a feature snapshot."""

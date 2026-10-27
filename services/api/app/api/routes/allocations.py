@@ -26,6 +26,30 @@ class AllocationRequest(BaseModel):
     cells: list[AllocationCellInput]
 
 
+@router.get("")
+def list_allocations(db: Session = Depends(get_db)):
+    """List saved budget allocation runs."""
+    ws = get_or_create_default_workspace(db)
+    runs = db.execute(
+        select(AllocationRun)
+        .where(AllocationRun.workspace_id == ws.id)
+        .order_by(AllocationRun.created_at.desc())
+        .limit(20)
+    ).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "campaign_id": r.campaign_id,
+            "total_budget": r.total_budget,
+            "fixed_cost": r.fixed_cost,
+            "method": r.method,
+            "results": r.results_json,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in runs
+    ]
+
+
 @router.post("", response_model=AllocationResult)
 def run_budget_allocation(
     payload: AllocationRequest,

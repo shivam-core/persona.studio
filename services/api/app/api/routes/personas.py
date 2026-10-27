@@ -65,13 +65,30 @@ class MaskedMemberItem(BaseModel):
 
 
 @router.get("", response_model=list[PersonaCardResponse])
-def list_persona_cards(db: Session = Depends(get_db)):
-    """List all published persona cards in active workspace."""
+def list_persona_cards(
+    segmentation_run_id: str | None = None,
+    latest_only: bool = True,
+    db: Session = Depends(get_db),
+):
+    """List published persona cards in active workspace, scoped to the latest run by default."""
     ws = get_or_create_default_workspace(db)
+    query = select(PersonaCard).where(PersonaCard.workspace_id == ws.id)
+
+    if segmentation_run_id:
+        query = query.where(PersonaCard.segmentation_run_id == segmentation_run_id)
+    elif latest_only:
+        latest_card = db.execute(
+            select(PersonaCard)
+            .where(PersonaCard.workspace_id == ws.id)
+            .order_by(PersonaCard.created_at.desc())
+        ).scalars().first()
+        if latest_card:
+            query = query.where(PersonaCard.segmentation_run_id == latest_card.segmentation_run_id)
+        else:
+            return []
+
     cards = db.execute(
-        select(PersonaCard)
-        .where(PersonaCard.workspace_id == ws.id)
-        .order_by(PersonaCard.created_at.desc(), PersonaCard.segment_ordinal.asc())
+        query.order_by(PersonaCard.segment_ordinal.asc())
     ).scalars().all()
 
     return [

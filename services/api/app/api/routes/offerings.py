@@ -128,3 +128,94 @@ def create_offering(
         description=offering.description,
         is_active=offering.is_active,
     )
+
+
+@router.get("/{offering_id}", response_model=OfferingResponse)
+def get_offering(offering_id: str, db: Session = Depends(get_db)):
+    """Fetch an offering by id or offering_id."""
+    ws = get_or_create_default_workspace(db)
+    offering = db.execute(
+        select(Offering).where(
+            Offering.workspace_id == ws.id,
+            (Offering.id == offering_id) | (Offering.offering_id == offering_id),
+        )
+    ).scalars().first()
+
+    if not offering:
+        raise HTTPException(status_code=404, detail="Offering not found.")
+
+    return OfferingResponse(
+        id=offering.id,
+        offering_id=offering.offering_id,
+        name=offering.name,
+        category=offering.category,
+        kind=offering.kind,
+        list_price=offering.list_price,
+        unit_variable_cost=offering.unit_variable_cost,
+        fixed_campaign_cost_default=offering.fixed_campaign_cost_default,
+        capacity_units=offering.capacity_units,
+        billing_period_months=offering.billing_period_months,
+        monthly_variable_cost=offering.monthly_variable_cost,
+        description=offering.description,
+        is_active=offering.is_active,
+    )
+
+
+@router.get("/{offering_id}/fit")
+def get_offering_fit(offering_id: str, db: Session = Depends(get_db)):
+    """Evaluate explainable heuristic fit of an offering against all published persona cards."""
+    from app.db.models.persona import PersonaCard, EvidenceMetric
+    from app.domain.matching.engine import score_offering_fit
+
+    ws = get_or_create_default_workspace(db)
+
+    offering = db.execute(
+        select(Offering).where(
+            Offering.workspace_id == ws.id,
+            (Offering.id == offering_id) | (Offering.offering_id == offering_id),
+        )
+    ).scalars().first()
+
+    if not offering:
+        raise HTTPException(status_code=404, detail="Offering not found.")
+
+    cards = db.execute(
+        select(PersonaCard).where(PersonaCard.workspace_id == ws.id)
+    ).scalars().all()
+
+    results = []
+    offering_dict = {
+        "offering_id": offering.offering_id,
+        "name": offering.name,
+        "category": offering.category,
+        "kind": offering.kind,
+        "list_price": offering.list_price,
+    }
+
+    for c in cards:
+        metrics = db.execute(
+            select(EvidenceMetric).where(EvidenceMetric.persona_card_id == c.id)
+        ).scalars().all()
+
+        m_dict = {em.metric_key: em.value for em in metrics}
+        m_dict["persona_id"] = c.id
+        m_dict["category_shares"] = {offering.category.lower(): 0.35}
+
+        fit_res = score_offering_fit(m_dict, offering_dict)
+        components_map = {c.name.lower(): c.normalized_score for c in fit_res.components}
+        results.append({
+            "persona_card_id": c.id,
+            "offering_id": offering.id,
+            "fit_score": fit_res.fit_score or 0.0,
+            "fit_label": fit_res.fit_label.replace(" Fit", ""),
+            "breakdown": {
+                "category_affinity": components_map.get("category affinity", 0.35),
+                "spend_compatibility": components_map.get("spend compatibility", 0.50),
+                "recency_engagement": components_map.get("engagement recency", 0.40),
+                "category_activity": components_map.get("observed category engagement", 0.25),
+            },
+            "explanation": fit_res.reasoning,
+        })
+
+    return results
+

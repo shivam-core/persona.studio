@@ -23,6 +23,27 @@ class SaveSimulationRequest(BaseModel):
     draws: int = 1000
 
 
+from pydantic import BaseModel, model_validator
+
+
+class MonteCarloPreviewRequest(BaseModel):
+    inputs: SimulationInputs | None = None
+    draws: int = 1000
+    seed: int = 42
+
+    @model_validator(mode="before")
+    @classmethod
+    def assemble_inputs(cls, data: any):
+        if not isinstance(data, dict):
+            return data
+        if "inputs" in data and isinstance(data["inputs"], dict):
+            return data
+        # If flat inputs were passed directly
+        draws = data.pop("draws", 1000)
+        seed = data.pop("seed", 42)
+        return {"inputs": data, "draws": draws, "seed": seed}
+
+
 @router.post("/preview", response_model=SimulationResult)
 def preview_simulation_economics(payload: SimulationInputs):
     """
@@ -31,6 +52,44 @@ def preview_simulation_economics(payload: SimulationInputs):
     """
     try:
         return simulate_expected(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _build_histogram(samples: list[float], num_bins: int = 15):
+    if not samples:
+        return []
+    import numpy as np
+    counts, bin_edges = np.histogram(samples, bins=num_bins)
+    hist = []
+    for i in range(len(counts)):
+        hist.append({
+            "bin_min": round(float(bin_edges[i]), 1),
+            "bin_max": round(float(bin_edges[i+1]), 1),
+            "count": int(counts[i]),
+        })
+    return hist
+
+
+@router.post("/monte_carlo")
+@router.post("/monte-carlo")
+def preview_monte_carlo(payload: MonteCarloPreviewRequest):
+    """
+    Run 1,000-draw Monte Carlo uncertainty analysis preview without requiring saving a run.
+    """
+    try:
+        res = simulate_uncertainty(payload.inputs, seed=payload.seed, draws=payload.draws)
+        d = res.model_dump()
+        samples = res.profit_distribution_samples
+        hist = _build_histogram(samples, num_bins=15)
+        d.update({
+            "median_profit": res.profit_median,
+            "p10_profit": res.profit_p10,
+            "p90_profit": res.profit_p90,
+            "probability_positive_profit": res.prob_positive_profit,
+            "histogram": hist,
+        })
+        return d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

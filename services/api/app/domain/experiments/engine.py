@@ -47,17 +47,32 @@ class ExperimentAnalysis(BaseModel):
     primary_metric: str
     headline_causal_claim_allowed: bool
     overall_treatment_rate: float | None = None
+    treatment_rate: float | None = None
     overall_control_rate: float | None = None
+    control_rate: float | None = None
     percentage_point_lift: float | None = None
+    absolute_lift_pp: float | None = None
     relative_percent_uplift: float | None = None
+    relative_uplift_pct: float | None = None
     incremental_converters_at_test_scale: float | None = None
+    incremental_purchasers: float | None = None
     incremental_contribution_before_marketing: float | None = None
     actual_campaign_cost: float = 0.0
     incremental_campaign_contribution_profit: float | None = None
+    incremental_net_contribution: float | None = None
     confidence_intervals: dict[str, Any] = Field(default_factory=dict)
+    ci_lower_pp: float = 0.0
+    ci_upper_pp: float = 0.0
     p_value: float | None = None
     is_statistically_significant: bool = False
-    verdict_message: str
+    verdict_message: str = ""
+    conclusion_text: str = ""
+    treatment_assigned: int = 0
+    control_assigned: int = 0
+    treatment_converters: int = 0
+    control_converters: int = 0
+    incremental_cac: float | None = None
+    strata_breakdown: list[dict] = Field(default_factory=list)
     exploratory_strata: list[StrataAnalysisItem] = Field(default_factory=list)
     balance_checks: dict[str, Any] = Field(default_factory=dict)
     diagnostics: dict[str, Any] = Field(default_factory=dict)
@@ -127,22 +142,58 @@ def analyze_experiment(
     Pure ITT impact analyzer with outcome completeness validation and stratified bootstrap CIs.
     """
     exp_id = str(preregistration.get("experiment_id", ""))
-    total_assigned = len(assignments_df)
+    total_assigned = len(assignments_df) if assignments_df is not None else 0
+
+    if total_assigned == 0:
+        return ExperimentAnalysis(
+            experiment_id=exp_id,
+            is_complete=False,
+            assigned_total=0,
+            outcomes_reported=0,
+            missing_outcomes=0,
+            primary_metric="conversion_rate",
+            headline_causal_claim_allowed=False,
+            actual_campaign_cost=actual_campaign_cost,
+            verdict_message="No customer profiles assigned to this test yet.",
+            diagnostics={"outcome_completeness_pct": 0.0, "missing_outcomes_count": 0},
+        )
+
+    # Ensure required assignment columns exist
+    req_assign_cols = ["customer_id", "stratum_persona_id", "arm"]
+    clean_assignments = assignments_df.copy() if assignments_df is not None and not assignments_df.empty else pd.DataFrame(columns=req_assign_cols)
+    for col in req_assign_cols:
+        if col not in clean_assignments.columns:
+            clean_assignments[col] = "default" if col == "stratum_persona_id" else "control"
+
+    # Ensure required outcome columns exist even if outcomes_df is empty
+    req_outcome_cols = ["customer_id", "converted", "net_revenue", "variable_cost", "outcome_complete"]
+    if outcomes_df is None or outcomes_df.empty:
+        clean_outcomes = pd.DataFrame(columns=req_outcome_cols)
+    else:
+        clean_outcomes = outcomes_df.copy()
+        for col in req_outcome_cols:
+            if col not in clean_outcomes.columns:
+                clean_outcomes[col] = np.nan
 
     # Merge on customer_id; arm comes strictly from stored assignments_df!
     merged = pd.merge(
-        assignments_df[["customer_id", "stratum_persona_id", "arm"]],
-        outcomes_df[["customer_id", "converted", "net_revenue", "variable_cost", "outcome_complete"]],
+        clean_assignments[req_assign_cols],
+        clean_outcomes[req_outcome_cols],
         on="customer_id",
         how="left",
     )
 
     outcomes_reported = int(merged["converted"].notna().sum())
     missing_outcomes = total_assigned - outcomes_reported
-    is_complete = (missing_outcomes == 0) and bool(merged["outcome_complete"].fillna(False).all())
+    is_complete = (missing_outcomes == 0 and outcomes_reported > 0) and bool(merged["outcome_complete"].fillna(False).all())
 
-    # If incomplete, suppress headline causal claim
+    # If incomplete or no outcomes recorded yet, suppress headline causal claim
     if not is_complete:
+        verdict = (
+            "No outcome records imported yet. Record test evaluation scenarios or import conversion logs to calculate lift."
+            if outcomes_reported == 0
+            else f"Observation window incomplete: {missing_outcomes} of {total_assigned} assigned customers lack finalized outcome records. Headline causal claims suppressed until complete."
+        )
         return ExperimentAnalysis(
             experiment_id=exp_id,
             is_complete=False,
@@ -152,10 +203,8 @@ def analyze_experiment(
             primary_metric="conversion_rate",
             headline_causal_claim_allowed=False,
             actual_campaign_cost=actual_campaign_cost,
-            verdict_message=(
-                f"Observation window incomplete: {missing_outcomes} of {total_assigned} assigned customers "
-                "lack finalized outcome records. Headline causal claims suppressed until complete."
-            ),
+            verdict_message=verdict,
+            conclusion_text=verdict,
             diagnostics={
                 "outcome_completeness_pct": round(outcomes_reported / total_assigned * 100, 1) if total_assigned > 0 else 0.0,
                 "missing_outcomes_count": missing_outcomes,
@@ -247,17 +296,38 @@ def analyze_experiment(
         primary_metric="conversion_rate",
         headline_causal_claim_allowed=True,
         overall_treatment_rate=round(overall_control + overall_delta, 4),
+        treatment_rate=round(overall_control + overall_delta, 4),
         overall_control_rate=round(overall_control, 4),
+        control_rate=round(overall_control, 4),
         percentage_point_lift=round(overall_delta * 100, 2),
+        absolute_lift_pp=round(overall_delta * 100, 2),
         relative_percent_uplift=round(rel_uplift * 100, 2) if rel_uplift is not None else None,
+        relative_uplift_pct=round(rel_uplift * 100, 2) if rel_uplift is not None else None,
         incremental_converters_at_test_scale=round(incr_conv_total, 1),
+        incremental_purchasers=round(incr_conv_total, 1),
         incremental_contribution_before_marketing=round(incr_contrib_total, 2),
         actual_campaign_cost=round(actual_campaign_cost, 2),
         incremental_campaign_contribution_profit=round(incr_profit, 2),
+        incremental_net_contribution=round(incr_profit, 2),
         confidence_intervals=ci_res.to_dict(),
+        ci_lower_pp=round(float(ci_res.lift_pp_ci[0]) * 100, 2),
+        ci_upper_pp=round(float(ci_res.lift_pp_ci[1]) * 100, 2),
         p_value=ci_res.bootstrap_p_value,
         is_statistically_significant=is_sig,
         verdict_message=verdict,
+        conclusion_text=verdict,
+        treatment_assigned=int((merged['arm']=='treatment').sum()),
+        control_assigned=int((merged['arm']=='control').sum()),
+        treatment_converters=int(merged[merged['arm']=='treatment']['conv_bool'].sum()),
+        control_converters=int(merged[merged['arm']=='control']['conv_bool'].sum()),
+        strata_breakdown=[{
+            "stratum_name": s.stratum_id,
+            "treatment_n": s.assigned_treatment,
+            "control_n": s.assigned_control,
+            "treatment_rate": s.rate_treatment,
+            "control_rate": s.rate_control,
+            "lift_pp": s.percentage_point_lift,
+        } for s in strata_items],
         exploratory_strata=strata_items,
         balance_checks={
             "sample_ratio_treatment": round(len(merged[merged['arm']=='treatment']) / total_assigned, 4),

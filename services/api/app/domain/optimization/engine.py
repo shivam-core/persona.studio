@@ -2,21 +2,40 @@
 
 import math
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AllocationCellInput(BaseModel):
-    cell_id: str
+    cell_id: str | None = None
     persona_id: str
     persona_name: str
     channel: str
-    audience_n: int = Field(ge=0)
-    cost_per_contact: float = Field(gt=0)
-    baseline_conversion: float = Field(ge=0, le=1)
-    contribution_per_purchaser: float
+    audience_n: int = Field(default=1000, ge=0)
+    cost_per_contact: float | None = Field(default=None, gt=0)
+    unit_cost: float | None = None
+    baseline_conversion: float | None = Field(default=None, ge=0, le=1)
+    conversion_prob: float | None = None
+    contribution_per_purchaser: float | None = None
+    margin: float | None = None
     saturation_lambda: float = Field(default=0.0, ge=0)
     min_budget: float = Field(default=0.0, ge=0)
     max_budget: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "cost_per_contact" not in data or data.get("cost_per_contact") is None:
+                data["cost_per_contact"] = data.get("unit_cost", 1.0)
+            if "baseline_conversion" not in data or data.get("baseline_conversion") is None:
+                data["baseline_conversion"] = data.get("conversion_prob", 0.05)
+            if "contribution_per_purchaser" not in data or data.get("contribution_per_purchaser") is None:
+                data["contribution_per_purchaser"] = data.get("margin", 100.0)
+            if "cell_id" not in data or not data.get("cell_id"):
+                p_id = data.get("persona_id", "p")
+                ch = data.get("channel", "ch")
+                data["cell_id"] = f"{p_id}_{ch}"
+        return data
 
 
 class CellAllocationResult(BaseModel):
@@ -25,15 +44,20 @@ class CellAllocationResult(BaseModel):
     persona_name: str
     channel: str
     allocated_spend: float
+    allocated_budget: float = 0.0
     expected_contacts: float
     expected_purchasers: float
     contribution_before_marketing: float
     net_cell_contribution_profit: float
+    contribution_profit: float = 0.0
+    is_recommended: bool = True
     share_of_variable_spend: float
 
 
 class AllocationResult(BaseModel):
     total_budget: float
+    total_allocated: float = 0.0
+    allocated_budget: float = 0.0
     fixed_cost: float
     spendable_variable_budget: float
     allocated_variable_spend: float
@@ -41,8 +65,10 @@ class AllocationResult(BaseModel):
     total_expected_purchasers: float
     total_contribution_profit: float
     recommended_action: str  # "launch", "do_not_launch"
+    recommendation: str = "launch"
     recommendation_reason: str
     cell_allocations: list[CellAllocationResult]
+    cells: list[CellAllocationResult] = []
     comparison: dict[str, Any]  # Current vs Equal Split vs Model-Based
 
 
@@ -144,10 +170,13 @@ def allocate_budget(
             persona_name=cell.persona_name,
             channel=cell.channel,
             allocated_spend=round(s, 2),
+            allocated_budget=round(s, 2),
             expected_contacts=round(min(float(cell.audience_n), s / cell.cost_per_contact), 1),
             expected_purchasers=round(q_purch, 1),
             contribution_before_marketing=round(contrib, 2),
             net_cell_contribution_profit=round(contrib - s, 2),
+            contribution_profit=round(contrib - s, 2),
+            is_recommended=s > 0,
             share_of_variable_spend=round(s / total_var_spend, 4) if total_var_spend > 0 else 0.0,
         ))
 
@@ -172,16 +201,26 @@ def allocate_budget(
             "spend": round(total_var_spend, 2),
             "purchasers": round(total_purchasers, 1),
             "profit": round(total_profit, 2),
+            "budget": round(total_var_spend, 2),
         },
         "equal_split": {
             "spend": round(spendable_budget, 2),
             "purchasers": round(equal_purchasers, 1),
             "profit": round(equal_profit, 2),
+            "budget": round(spendable_budget, 2),
+        },
+        "current": {
+            "spend": round(spendable_budget, 2),
+            "purchasers": round(equal_purchasers, 1),
+            "profit": round(equal_profit, 2),
+            "budget": round(spendable_budget, 2),
         },
     }
 
     return AllocationResult(
         total_budget=round(total_budget, 2),
+        total_allocated=round(total_var_spend, 2),
+        allocated_budget=round(total_var_spend, 2),
         fixed_cost=round(fixed_cost, 2),
         spendable_variable_budget=round(spendable_budget, 2),
         allocated_variable_spend=round(total_var_spend, 2),
@@ -189,7 +228,9 @@ def allocate_budget(
         total_expected_purchasers=round(total_purchasers, 1),
         total_contribution_profit=round(total_profit, 2),
         recommended_action=action,
+        recommendation=action,
         recommendation_reason=reason,
         cell_allocations=results_list,
+        cells=results_list,
         comparison=comparison,
     )
